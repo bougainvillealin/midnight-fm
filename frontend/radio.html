@@ -106,6 +106,9 @@ body,.mast *,.notes,.notes *,.bar,.bar *{transition:background-color var(--t),co
 .list .d{font:500 8.5px var(--mono);color:var(--ink3)}
 .list li.her .k{color:var(--red)}
 .list li.her .x{color:var(--ink)}
+/* SEG:RADIO v12 —— 放不了的那首：记号红，后面一个去网易云的口子 */
+.list li.nos .k{color:var(--red)}
+.list .x a.jump{display:inline-block;margin-left:6px;color:var(--red);font:700 11px/1.7 var(--serif);text-decoration:none;border-bottom:1px solid currentColor;white-space:nowrap}
 .list li.todo .x{color:var(--ink3)}
 .list li.cur .x{color:var(--red);font-weight:700}
 .err{margin-top:12px;font:500 11px/1.6 var(--serif);color:var(--red)}
@@ -1089,6 +1092,12 @@ async function pump(S) {
   if (item.type === 'gap') { await sleep(item.ms || 600); if (S.gone) return; S.playing = null; return pump(S); }
   if (item.type === 'bgm') { S.bgm = item.mood; S.playing = null; bedApply(); drawNotes(); return pump(S); }
   if (item.type === 'water') { S.water = item.name || null; S.playing = null; if (item.name) waterStart(item.name); else waterStop(); return pump(S); }
+  if (item.type === 'nosong') {   /* v12：他点的这首这边放不了 —— 单子里留一行，带网易云的说法和去 App 的口子，不停 */
+    S.log.push(['✕', '《' + item.title + '》' + (item.artist ? ' — ' + item.artist : '') + '\n' + (item.text || '放不出来'), hhmm(), false, { ori: item.ori || '', q: item.title + (item.artist ? ' ' + item.artist : '') }]);
+    while (S.log.length > 12) S.log.shift();
+    toast('《' + item.title + '》' + (item.text || '放不出来'));
+    S.playing = null; drawNotes(); return pump(S);
+  }
   if (item.type === 'say') bedLevel(BED_SPEAK); else if (item.type === 'song') bedLevel(0);
   if (item.type === 'say') {
     S.now = { type: 'say', text: item.show || item.text, pos: item.pos, at: hhmm() };
@@ -1300,8 +1309,36 @@ function revealTo(f) {
 }
 const PICK = { scene: '随机', mood: '宠着你', level: '亲密' };
 function chips(group, opts) { return `<div class="chips">${opts.map(o => `<button type="button" class="chip${PICK[group] === o ? ' on' : ''}" data-g="${group}" data-v="${o}">${o}</button>`).join('')}</div>`; }
+/* SEG:RADIO v12 —— 她 10-19：「放歌放不出来是为什么」→ 网易云开放平台这个渠道没授权（visible=false），她翻到「无法播放 toast 文案」那篇：「可以加个这个」。
+   后端不再悄悄拿掉放不了的那首，给一块 {type:'nosong', title, artist, text, ori}：单子里留一行「✕ 《歌名》 — 歌手 / 网易云的说法」，后面一个口子。
+   App 的安卓壳（WebView）要是接不住 orpheus:// 这种链接（会跳成报错页），壳里就改成复制「歌名 歌手」；壳给了 openUrl 就直接跳；
+   手机浏览器里用 orpheus://song/<编号> 叫起网易云；电脑上开网页版。 */
+function hostApp() { try { return window.RadioNative || (window.parent !== window && window.parent.RadioNative) || null; } catch (e) { return null; } }
+const IN_APP = !!hostApp() || /; wv\)/.test(navigator.userAgent);
+const CAN_OPEN = !!(hostApp() && typeof hostApp().openUrl === 'function');
+function jumpHtml(o) {
+  return ` <a class="jump" href="#" data-ori="${esc(o.ori || '')}" data-q="${esc(o.q || '')}">${IN_APP && !CAN_OPEN ? '复制歌名，去网易云搜 →' : '去网易云 App 听 →'}</a>`;
+}
+function copyText(t) {
+  const x = document.createElement('textarea'); x.value = t; x.style.position = 'fixed'; x.style.opacity = '0';
+  document.body.appendChild(x); x.select(); try { document.execCommand('copy'); } catch (e) {} x.remove();
+}
+document.addEventListener('click', e => {
+  const a = e.target && e.target.closest ? e.target.closest('a.jump') : null;
+  if (!a) return;
+  e.preventDefault();
+  const ori = a.dataset.ori, q = a.dataset.q, app = hostApp();
+  if (ori && app && typeof app.openUrl === 'function') { try { app.openUrl('orpheus://song/' + ori); return; } catch (err) {} }
+  if (ori && !IN_APP) {
+    if (/Android|iPhone|iPad/i.test(navigator.userAgent)) location.href = 'orpheus://song/' + ori;
+    else window.open('https://music.163.com/#/song?id=' + encodeURIComponent(ori), '_blank');
+    return;
+  }
+  const done = () => toast('「' + q + '」复制好了，去网易云 App 里搜');
+  try { navigator.clipboard.writeText(q).then(done, () => { copyText(q); done(); }); } catch (err) { copyText(q); done(); }
+});
 function listHtml(log) {
-  return `<ol class="list">${log.slice().reverse().map((r, j) => `<li class="${r[3] ? 'her' : ''}"><span class="n">${String(log.length - j).padStart(2, '0')}</span><span class="k">${esc(r[0])}</span><span class="x">${esc(r[1])}</span><span class="d">${esc(r[2] || '')}</span></li>`).join('')}</ol>`;
+  return `<ol class="list">${log.slice().reverse().map((r, j) => `<li class="${r[3] ? 'her' : ''}${r[4] ? ' nos' : ''}"><span class="n">${String(log.length - j).padStart(2, '0')}</span><span class="k">${esc(r[0])}</span><span class="x">${esc(r[1])}${r[4] ? jumpHtml(r[4]) : ''}</span><span class="d">${esc(r[2] || '')}</span></li>`).join('')}</ol>`;
 }
 /* SEG:RADIO v10 —— 她 10-19：「要不要做滚动歌词啊」「对！你看放哪好」。
    放在 NOW PLAYING 那块（他说话时那句字亮起来的位置）：歌名歌手缩成一行小字，下面一个窗，当前这句大字、前后几句淡，

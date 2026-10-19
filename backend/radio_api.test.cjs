@@ -76,6 +76,7 @@ const fake = http.createServer((req, res) => {
   process.env.RADIO_SITE_DIR = site;
   process.env.RADIO_DATA_DIR = fz;
   process.env.RADIO_TOKEN_FILE = path.join(tmp, 'token');
+  process.env.RADIO_URL_COUNTS_AS_PLAY = '1';   /* 假宿主：取地址会被记成听过（v13 那句会出现） */
   process.env.NCM_APP_LOG = ncmLog;
   const api = require(path.join(site, 'radio_api.cjs'));
   const mem = require(path.join(site, 'host', 'memory.js')).mem;
@@ -132,9 +133,11 @@ const fake = http.createServer((req, res) => {
 
   /* 他点了一首放不了的：不排进去，下一段告诉他换一首 */
   r = await api.turn({ station: 'talk', kind: 'memo', text: '放一首放不了的' });
-  assert.deepStrictEqual(r.obj.parts.map(p => p.type), ['say']);
+  assert.deepStrictEqual(r.obj.parts.map(p => p.type), ['say', 'nosong']);
+  assert.deepStrictEqual(r.obj.parts[1], { type: 'nosong', title: 'Nope', artist: 'Nobody', text: '因合作方要求，暂不支持收听', ori: '1' }, 'v12：放不了的留一行，带网易云的说法和编号');
   r = await api.turn({ station: 'talk', kind: 'next' });
   assert.ok(/《Nope》在这边放不出来/.test(got[got.length - 1].body.message), got[got.length - 1].body.message);
+  assert.ok(/网易云的说法：《Nope》因合作方要求，暂不支持收听。/.test(got[got.length - 1].body.message), 'v12：告诉他网易云的说法');
   r = await api.turn({ station: 'talk', kind: 'next' });
   assert.ok(!/放不出来/.test(got[got.length - 1].body.message), '说过一次就不再说');
   ok('放不了的歌不排进去，下一段告诉他一次');
@@ -415,7 +418,9 @@ const fake = http.createServer((req, res) => {
   assert.ok(nl.some(l => l.dropped && l.dropped.indexOf('晚安') >= 0), '挡掉的歌记进今晚');
   r = await api.turn({ station: 'talk', kind: 'open' });
   const om = got[got.length - 1].body.message;
-  assert.ok(/这七天放过的（别再点，换没放过的）：《晚安》颜人中、/.test(om) && /《晴天》/.test(om), om);
+  assert.ok(/这七天电台放过的（别再点，换没放过的）：《晚安》颜人中、/.test(om) && /《晴天》/.test(om), om);
+  assert.ok(/翻她的听歌记录时分清：.*上面这七天电台放过的 —— 都是电台放的，不是她自己点开听的.*红心最准/.test(om), 'v13：翻听歌记录那句 ' + om);
+  assert.ok(!/更早电台放过的/.test(om), '没有八天以前的就不提');
   assert.ok(/试过、网易云这边放不出来的（别点）：/.test(om) && /《Nope》Nobody/.test(om) && /《Ocean Eyes》Billie Eilish/.test(om), om);
   r = await api.turn({ station: 'pillow', kind: 'open', order: { mood: '宠着你', level: '甜' } });
   assert.ok(!/这七天放过的/.test(got[got.length - 1].body.message), '枕話不带单子');
@@ -437,6 +442,36 @@ const fake = http.createServer((req, res) => {
   assert.strictEqual(pl.filter(p => p.at > Date.now() - 864e5).length, 2, '开场放的也记进去');
   ok('开场歌：七天里放过的先不放、都放过挑最久没放的、过七天又能放');
 
+  /* SEG:RADIO v13 —— 翻她听歌记录时分清：八到三十天前电台放过的也给他（只用来剔），超过三十天的不给 */
+  {
+    const j = JSON.parse(fs.readFileSync(stFile, 'utf8'));
+    const ago = d => Date.now() - d * 864e5;
+    j.played.push({ id: api.songId('旧歌', '某人'), title: '旧歌', artist: '某人 / 另一个', st: 'music', at: ago(10) });
+    j.played.push({ id: api.songId('太旧的歌', '某人'), title: '太旧的歌', artist: '某人', st: 'music', at: ago(40) });
+    j.played.sort((a, b) => a.at - b.at);
+    fs.writeFileSync(stFile, JSON.stringify(j));
+    r = await api.turn({ station: 'music', kind: 'open' });
+    const m13 = got[got.length - 1].body.message;
+    assert.ok(/上面这七天电台放过的，还有更早电台放过的[^\n]*《旧歌》某人 —— 都是电台放的/.test(m13), m13);
+    assert.ok(!/太旧的歌/.test(m13), '三十天以前的不给');
+    assert.ok(!/这七天电台放过的（别再点，换没放过的）：[^\n]*旧歌/.test(m13), '更早的不进「别再点」那张');
+    process.env.RADIO_URL_COUNTS_AS_PLAY = '0';
+    r = await api.turn({ station: 'music', kind: 'open' });
+    assert.ok(!/翻她的听歌记录时分清/.test(got[got.length - 1].body.message), '宿主取地址不记成听过：不提');
+    process.env.RADIO_URL_COUNTS_AS_PLAY = '1';
+    j.played = j.played.filter(p => p.title === '旧歌');
+    fs.writeFileSync(stFile, JSON.stringify(j));
+    r = await api.turn({ station: 'music', kind: 'open' });
+    const m13b = got[got.length - 1].body.message;
+    assert.ok(!/这七天电台放过的（/.test(m13b) && /翻她的听歌记录时分清：[^\n]*更早电台放过的《旧歌》某人 —— 都是电台放的/.test(m13b), '只有更早的：也提 ' + m13b);
+    j.played = [];
+    fs.writeFileSync(stFile, JSON.stringify(j));
+    r = await api.turn({ station: 'music', kind: 'open' });
+    assert.ok(!/翻她的听歌记录时分清/.test(got[got.length - 1].body.message), '电台一首没放过就不提');
+    fs.writeFileSync(stFile, JSON.stringify(Object.assign(j, { played: pl })));
+  }
+  ok('翻她听歌记录时分清哪些是电台放的：七天的 + 八到三十天的，超过三十天不给（v13）');
+
   /* SEG:RADIO v11 —— 一首放不了：把这个歌手在这边能放的几首递给他 */
   api._setSearch(async (kw, lim) => {
     if (kw === '某歌手 不能放的歌') return { data: { records: [{ id: 'X1', name: '不能放的歌', artists: [{ name: '某歌手' }], visible: false }] } };
@@ -451,12 +486,30 @@ const fake = http.createServer((req, res) => {
   forceTalk = ['放一首。', '[song:不能放的歌|某歌手]'];
   r = await api.turn({ station: 'talk', kind: 'next' });
   forceTalk = null;
-  assert.deepStrictEqual(r.obj.parts.map(p => p.type), ['say']);
+  assert.deepStrictEqual(r.obj.parts.map(p => p.type), ['say', 'nosong']);
   r = await api.turn({ station: 'talk', kind: 'next' });
   const am = got[got.length - 1].body.message;
   assert.ok(/《不能放的歌》在这边放不出来/.test(am) && /某歌手在这边能放的：《能放的一》《能放的二》。/.test(am) && !/放不了的三|别人的歌/.test(am), am);
   api._setSearch(fakeSearch);
   ok('放不了的那首：这个歌手在这边能放的几首递给他（v11）');
+
+  /* SEG:RADIO v12 —— 网易云的说法：没版权 / 数字专辑 / 要会员 / 没搜到；playFlag=false 的版本不挑 */
+  const yes = () => true;
+  assert.strictEqual(api.whyNot([{ name: 'a', visible: false, originalId: 9 }], yes, yes).text, '因合作方要求，暂不支持收听');
+  assert.strictEqual(api.whyNot([{ name: 'a', visible: true, playFlag: false, songFee: 4 }], yes, yes).why, 'album');
+  assert.strictEqual(api.whyNot([{ name: 'a', visible: true, playFlag: false, vipFlag: true }], yes, yes).text, 'VIP 歌曲，要开通会员');
+  assert.deepStrictEqual(api.whyNot([], yes, yes), { why: 'notfound', text: '网易云上没搜到这一首' });
+  api._setSearch(async kw => /专辑歌/.test(kw) ? { data: { records: [
+    { id: 'P1', originalId: 31, name: '专辑歌', artists: [{ name: '某人' }], visible: true, playFlag: false, songFee: 4 }] } } : { data: { records: [] } });
+  let fv = {};
+  assert.strictEqual(await api.findPlayable('专辑歌', '某人', {}, fv), null, 'visible=true 但 playFlag=false：不挑');
+  assert.strictEqual(fv.bad.why, 'album');
+  assert.strictEqual(fv.bad.ori, '31');
+  fv = {};
+  await api.findPlayable('专辑歌', '某人', {}, fv);
+  assert.strictEqual(fv.bad && fv.bad.why, 'album', '记住的那份也带原因');
+  api._setSearch(fakeSearch);
+  ok('放不了的原因：照网易云那张表翻；playFlag=false 的版本不挑（v12）');
 
   console.log('\n' + n + ' 组都过了');
   fake.close();

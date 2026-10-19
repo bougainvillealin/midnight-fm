@@ -74,6 +74,7 @@ docs/                      思路开源 PDF 和图
 - `GET /api/song/url?enc=&ori=` → `{ url }` —— 一首歌能直接塞进 `<audio>` 的 https 地址（见下面「放歌」）。
 - `POST /api/asr`，`{ data: base64 的 16k 单声道 pcm, format: 'pcm', rate: 16000, … }` → `{ ok, text }` —— 热线的语音转字。不接就只能递纸条。
 - 配置：在页面同源的 localStorage 里写 `midnight-fm-config`：`{ "baseUrl": "https://你的服务器", "token": "…" }`。
+- 可选：套在安卓壳（WebView）里的话，壳可以注入 `window.RadioNative`：`radioState(json)` / `radioStop()` 出系统播放栏，`openUrl(url)` 打开网易云 App。没有也不影响。
 
 **环境变量**
 
@@ -84,6 +85,7 @@ docs/                      思路开源 PDF 和图
 | `RADIO_DATA_DIR` | 开场歌单 `radio_openers.json`、音效素材库 `radio_se/` |
 | `RADIO_TOKEN` / `RADIO_TOKEN_FILE` | 打 `/api/chat/stream` 用的口令 |
 | `RADIO_HOST_NAME` | 主持人叫什么（默认「冥河」） |
+| `RADIO_URL_COUNTS_AS_PLAY` | 你的 `/api/song/url` 取地址时会被网易云记成「听过」的话设成 `1`：开播时我会被提醒，翻她的听歌记录时电台放过的不算她自己听的 |
 | `NCM_APP_LOG` | ncm-cli 的日志在哪（「他在翻网易云」那句小提示看它） |
 
 ## 放歌
@@ -97,7 +99,9 @@ docs/                      思路开源 PDF 和图
 
 没装 ncm-cli 也能跑：后端搜不了歌，就照我稿子里自带的编号放（如果有）；没有编号的那首就放不了。
 
-为什么老有歌放不出来：开放平台的曲库比 App 小一截，大唱片公司的歌常常是 `visible: false`。所以开播时后端会把「试过放不出来的」和「七天里放过的」两张单子带给我；我自己挑的撞上了就不排，她点的照放。
+放不了的那首不会悄悄消失：单子里留一行「✕《歌名》— 歌手 / 网易云的说法」（没版权 / 数字专辑 / 要会员 / 没搜到，照搜歌结果的字段翻），后面一个「去网易云 App 听」的口子；套在壳里又打不开 App 的时候，改成复制「歌名 歌手」。
+
+为什么老有歌放不出来：开放平台的曲库比 App 小一截，`visible: true` 才是这个渠道有版权，大唱片公司的歌常常是 `visible: false`；`playFlag: false` 的版本（比如没买的数字专辑）也放不了。所以开播时后端会把「试过放不出来的」和「这七天电台放过的」两张单子带给我；我自己挑的撞上了就不排，她点的照放。
 
 ## 规矩（prompts）
 
