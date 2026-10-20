@@ -21,10 +21,10 @@ fs.writeFileSync(ncmLog, '[2026-10-17 16:00:00.000] [INFO ] [NeteaseApi] GET /op
 /* 假模块：念字给个假 hash，搜歌只认两首，记忆记到数组里 */
 fs.mkdirSync(path.join(site, 'host'));
 fs.writeFileSync(path.join(site, 'host', 'tts.js'), `
-  let n = 0, mode = 'mm'; const calls = [];
-  module.exports = { calls, setMode: m => { mode = m; },
+  let n = 0, mode = 'mm'; const calls = [], opts = [];
+  module.exports = { calls, opts, setMode: m => { mode = m; }, CACHE_DIR: ${JSON.stringify(path.join(tmp, 'tts_cache'))},
     cfg: () => mode === 'mm' ? { provider: 'minimax' } : { provider: 'elevenlabs', el_voice_id: 'v1' },
-    synth: async t => { calls.push(t); if (/念不了/.test(t)) throw new Error('ElevenLabs 挂了'); n++; return { hash: String(n).padStart(40, 'a'), via: mode === 'el' ? 'ElevenLabs' : undefined }; } };`);
+    synth: async (t, o) => { calls.push(t); opts.push(o || null); if (/念不了/.test(t)) throw new Error('ElevenLabs 挂了'); n++; return { hash: String(n).padStart(40, 'a'), via: mode === 'el' ? 'ElevenLabs' : undefined, align: mode === 'el' && !!(o && o.timestamps) }; } };`);
 fs.writeFileSync(path.join(site, 'host', 'memory.js'), `
   const mem = [], events = []; module.exports = { mem, events, eventAppend: e => { events.push(e); return 1; }, remember: async (title, content, cat, imp, tags) => { mem.push({ title, content, cat, tags }); return { ok: true, id: mem.length }; } };`);
 
@@ -210,9 +210,17 @@ const fake = http.createServer((req, res) => {
   ttsMod.calls.length = 0; ttsMod.setMode('mm');
   r = await api.turn({ station: 'pillow', kind: 'open', order: { mood: '宠着你', level: '甜' } });
   assert.ok(ttsMod.calls.length >= 2 && ttsMod.calls.every(t => t.indexOf('[') < 0), '设定里不是 ElevenLabs：一个方括号都不送');
-  ttsMod.calls.length = 0; ttsMod.setMode('el');
+  ttsMod.calls.length = 0; ttsMod.opts.length = 0; ttsMod.setMode('el');
   r = await api.turn({ station: 'pillow', kind: 'open', order: { mood: '宠着你', level: '甜' } });
   assert.ok(ttsMod.calls.some(t => /\[low and close/.test(t)), 'ElevenLabs 正常：照原样送');
+  /* SEG:RADIO v14 —— 枕話单独用稳定度 0.75，别的台不带 */
+  assert.ok(ttsMod.opts.length >= 2 && ttsMod.opts.every(o => o && o.stability === 0.75), '枕話每句都带 stability 0.75：' + JSON.stringify(ttsMod.opts));
+  ttsMod.opts.length = 0;
+  forceTalk = ['今晚就聊两句。'];
+  await api.turn({ station: 'talk', kind: 'next' });
+  forceTalk = null;
+  assert.ok(ttsMod.opts.length >= 1 && ttsMod.opts.every(o => !o || o.stability == null), '别的台不带稳定度：' + JSON.stringify(ttsMod.opts));
+  ttsMod.opts.length = 0;
   ttsMod.calls.length = 0; ttsMod.setMode('elbroke');
   r = await api.turn({ station: 'pillow', kind: 'open', order: { mood: '宠着你', level: '甜' } });
   const withBr = ttsMod.calls.filter(t => /\[/.test(t)), noBr = ttsMod.calls.filter(t => t.indexOf('[') < 0);
@@ -307,6 +315,23 @@ const fake = http.createServer((req, res) => {
   assert.strictEqual(await api.digest('talk', true), false, '没有新的就不收第二次');
   ok('冷场半小时：夜話收一句进事件流，收过的清掉');
 
+  /* SEG:RADIO v16 —— 收台时顺手起一个标题，进 radio_archive，回放单子用 */
+  {
+    const tl = fs.readFileSync(api.archFile('talk'), 'utf8').trim().split('\n').map(JSON.parse).filter(e => e.kind === 'title');
+    assert.strictEqual(tl.length, 1, '收一次起一个标题');
+    assert.strictEqual(tl[0].title, '今晚聊了下班路上的风，她说有点累', '去掉「冥河：」和句号、最多十六个字：' + tl[0].title);
+    assert.ok(/给这一晚起一个标题/.test(asked[1]) && !/不写露骨/.test(asked[1]), '夜話的标题那句');
+    assert.strictEqual(api.cleanTitle('标题：《雨夜里的收音机》。'), '雨夜里的收音机');
+    assert.strictEqual(api.cleanTitle('You\'ve hit your session limit'), '');
+    const nl = api.nightsOf(api.readArchive('talk'));
+    const segsN = nl[nl.length - 1].segs.filter(e => e.kind !== 'title').length;
+    const call0 = (u) => new Promise(resolve => { const res = { writeHead(c) { this.c = c; }, end(s) { resolve({ c: this.c, j: JSON.parse(s) }); } }; api.handle({ method: 'GET', url: u }, res); });
+    const o0 = await call0('/api/radio/replay?station=talk');
+    assert.strictEqual(o0.j.nights[0].title, '今晚聊了下班路上的风，她说有点累');
+    assert.strictEqual(o0.j.nights[0].n, segsN, '标题那行不算一段');
+  }
+  ok('收台时起标题：记进回放、单子带 title、不算一段（v16）');
+
   /* 枕話：收台那句 <摘要> 已经进了记忆，今晚就清了；没说收台的，冷场了替他收一句进记忆 */
   assert.strictEqual(night('pillow'), undefined, '收台用了他自己的摘要');
   r = await api.turn({ station: 'pillow', kind: 'open', order: { scene: '下雨', mood: '宠着你', level: '甜' } });
@@ -316,6 +341,7 @@ const fake = http.createServer((req, res) => {
   assert.strictEqual(mem.length, m0 + 1);
   assert.ok(/^枕話 · \d\d-\d\d$/.test(mem[m0].title) && /情境：下雨/.test(mem[m0].content) && mem[m0].cat === '电台');
   assert.ok(/不复述露骨的细节/.test(asked[asked.length - 1]));
+  assert.ok(/枕話台：标题含蓄一点/.test(asked[asked.length - 1]), 'v16：枕話也起标题，含蓄');
   const pst = JSON.parse(fs.readFileSync(stFile, 'utf8')).stations.pillow;
   assert.ok(!pst.night && pst.tracks === null, '收完轨道表也清了');
   ok('冷场半小时：枕話替他收一句进记忆');
@@ -510,6 +536,73 @@ const fake = http.createServer((req, res) => {
   assert.strictEqual(fv.bad && fv.bad.why, 'album', '记住的那份也带原因');
   api._setSearch(fakeSearch);
   ok('放不了的原因：照网易云那张表翻；playFlag=false 的版本不挑（v12）');
+
+  /* SEG:RADIO v15 —— 回放：每一段记进 radio_archive；按晚列；逐字时间；以前的歌现找编号 */
+  {
+    const tm = require(path.join(site, 'host', 'tts.js'));
+    tm.setMode('el'); tm.opts.length = 0; api._resetEl();
+    const af = api.archFile('talk');
+    try { fs.unlinkSync(af); } catch (e) {}
+    forceTalk = ['先说一句。', '[歌] 晚安|颜人中|E-wanan|9|http://p/w.jpg'];
+    r = await api.turn({ station: 'talk', kind: 'req', text: '放晚安' });
+    assert.strictEqual(r.code, 200, JSON.stringify(r.obj));
+    const sayP = r.obj.parts.find(x => x.type === 'say');
+    assert.ok(sayP.align && /^[0-9a-f]{40}$/.test(sayP.align.replace(/a/g, 'a')), '有逐字时间的那句带 align：' + JSON.stringify(sayP));
+    assert.ok(tm.opts.some(o => o && o.timestamps === true && o.stability == null), '夜話要逐字时间、不带稳定度');
+    assert.ok(!sayP.ttsErr, '念成了的那句不该带 ttsErr：' + JSON.stringify(sayP));
+    tm.setMode('mm');
+    r = await api.turn({ station: 'talk', kind: 'req', text: '再说一句' });
+    const mmSay = r.obj.parts.find(x => x.type === 'say');
+    assert.ok(mmSay.audio && !mmSay.align && !mmSay.ttsErr, 'MiniMax 念的：有声音、没逐字时间、也不算没念成：' + JSON.stringify(mmSay));
+    tm.setMode('el'); api._resetEl();
+    fs.writeFileSync(af, fs.readFileSync(af, 'utf8').trim().split('\n').slice(0, 1).join('\n') + '\n');   /* 只留第一段，下面接着数 */
+    forceTalk = ['好。']; r = await api.turn({ station: 'talk', kind: 'her', text: '这首好听' }); forceTalk = null;
+    let lines = fs.readFileSync(af, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.strictEqual(lines.length, 2);
+    assert.deepStrictEqual(lines[0].parts.map(x => x.type), ['say', 'song']);
+    assert.ok(lines[0].parts[0].show === '先说一句。' && lines[0].parts[0].audio && lines[0].parts[0].align && !('text' in lines[0].parts[0]), '记 show / audio / align，不记带标签的原文');
+    assert.strictEqual(lines[0].parts[1].enc, 'E-wanan');
+    assert.strictEqual(lines[0].her, '放晚安'); assert.strictEqual(lines[1].her, '这首好听');
+    /* 一晚、两晚：隔三小时以上算另一晚 */
+    const old = { t: Date.now() - 5 * 3600e3, kind: 'next', bf: true, parts: [{ type: 'say', show: '以前那晚的一句。', audio: '/api/tts/' + 'b'.repeat(40) + '.mp3' }, { type: 'song', title: '晚安', artist: '颜人中' }] };
+    fs.writeFileSync(af, JSON.stringify(old) + '\n' + fs.readFileSync(af, 'utf8'));
+    o = await call('/api/radio/replay?station=talk');
+    assert.strictEqual(o.c, 200);
+    assert.strictEqual(o.j.nights.length, 2, JSON.stringify(o.j));
+    assert.ok(o.j.nights[0].from > o.j.nights[1].from, '新的在前');
+    assert.strictEqual(o.j.nights[0].n, 2); assert.strictEqual(o.j.nights[0].her, 2); assert.deepStrictEqual(o.j.nights[0].songs, ['晚安']);
+    assert.strictEqual(o.j.nights[1].back, true); assert.strictEqual(o.j.nights[1].first, '以前那晚的一句。');
+    o = await call('/api/radio/replay?station=talk&night=' + o.j.nights[1].id);
+    assert.strictEqual(o.j.segs.length, 1); assert.strictEqual(o.j.segs[0].parts[0].show, '以前那晚的一句。');
+    o = await call('/api/radio/replay?station=talk&night=123');
+    assert.strictEqual(o.c, 404);
+    o = await call('/api/radio/replay?station=../x');
+    assert.strictEqual(o.c, 400);
+    /* 枕話单子上不露字 */
+    fs.mkdirSync(api.ARCHIVE_DIR, { recursive: true });
+    fs.writeFileSync(api.archFile('pillow'), JSON.stringify({ t: Date.now(), kind: 'open', parts: [{ type: 'say', show: '不该出现在单子上', audio: '/api/tts/x.mp3' }] }) + '\n');
+    o = await call('/api/radio/replay?station=pillow');
+    assert.ok(o.j.nights.length === 1 && !o.j.nights[0].first, '枕話的单子不带字');
+    /* 逐字时间 */
+    fs.mkdirSync(tm.CACHE_DIR, { recursive: true });
+    const h = 'c'.repeat(40);
+    fs.writeFileSync(path.join(tm.CACHE_DIR, h + '.align.json'), JSON.stringify({ characters: ['你', '好'], character_start_times_seconds: [0, 0.3], character_end_times_seconds: [0.3, 0.6] }));
+    const call2 = (u) => new Promise(resolve => {
+      const res = { writeHead(c) { this.c = c; }, end(s) { resolve({ c: this.c, j: JSON.parse(s) }); } };
+      api.handle({ method: 'GET', url: u }, res);
+    });
+    o = await call2('/api/radio/align?h=' + h);
+    assert.strictEqual(o.c, 200); assert.deepStrictEqual(o.j.characters, ['你', '好']);
+    o = await call2('/api/radio/align?h=' + 'd'.repeat(40)); assert.strictEqual(o.c, 404);
+    o = await call2('/api/radio/align?h=../../etc/passwd'); assert.strictEqual(o.c, 400);
+    /* 以前只记了歌名的：现找编号 */
+    o = await call('/api/radio/findsong?title=' + encodeURIComponent('晚安') + '&artist=' + encodeURIComponent('颜人中'));
+    assert.strictEqual(o.c, 200); assert.strictEqual(o.j.song.enc, 'E-wanan');
+    o = await call('/api/radio/findsong?title=Nope&artist=Nobody'); assert.strictEqual(o.c, 404);
+    tm.setMode('mm');
+  }
+  ok('回放：每段记进 radio_archive、按晚列（枕話不露字）、逐字时间、以前的歌现找编号（v15）');
+
 
   console.log('\n' + n + ' 组都过了');
   fake.close();

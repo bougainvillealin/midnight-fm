@@ -109,6 +109,35 @@ body,.mast *,.notes,.notes *,.bar,.bar *{transition:background-color var(--t),co
 /* SEG:RADIO v12 —— 放不了的那首：记号红，后面一个去网易云的口子 */
 .list li.nos .k{color:var(--red)}
 .list .x a.jump{display:inline-block;margin-left:6px;color:var(--red);font:700 11px/1.7 var(--serif);text-decoration:none;border-bottom:1px solid currentColor;white-space:nowrap}
+/* SEG:RADIO v15 —— 字幕：有真时间的那句，字可以点（跳到那个字念的地方）；回放的单子 */
+.now .rv.timed .w{cursor:pointer}
+.desc .acts{display:flex;align-items:baseline;white-space:nowrap}
+.rp ol{list-style:none;margin-top:4px;border-top:1px solid var(--line)}
+.rp li{display:grid;grid-template-columns:1fr auto;gap:3px 10px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.rp li b{font:700 13px/1.4 var(--serif);color:var(--ink)}
+.rp li i{font:500 9px/1.4 var(--mono);color:var(--ink3);font-style:normal;text-align:right}
+.rp li span{grid-column:1/-1;font:500 11.5px/1.6 var(--serif);color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp .live{display:inline-block;margin:2px 0 12px;font:700 11.5px/1 var(--serif);color:var(--red);cursor:pointer;border-bottom:1px solid currentColor}
+.rp .none{font:500 12px/1.8 var(--serif);color:var(--ink3);padding:10px 0}
+/* SEG:RADIO v16 —— 回放单起一个小标签：合着的时候右边只露一枚红的「回放」；拉开是一屉，四个台像书边上的索引标签，从抽屉左边探出来 */
+.rptab,.rpd .sts button{writing-mode:vertical-rl;letter-spacing:.32em;font:700 14px/1 var(--serif);color:#fff;background:var(--red);border:0;border-radius:9px 0 0 9px;padding:11px 7px 9px;cursor:pointer;box-shadow:-2px 2px 8px rgba(0,0,0,.14)}
+.rptab{position:fixed;right:0;top:132px;z-index:6}
+.rptab.hide{opacity:0;pointer-events:none}
+.rpd{position:fixed;top:0;right:0;bottom:0;width:min(360px,82vw);background:var(--sheet);z-index:10;transform:translateX(calc(100% + 40px));transition:transform .4s cubic-bezier(.2,.75,.2,1);display:flex;flex-direction:column;box-shadow:-6px 0 24px rgba(0,0,0,.12)}
+.rpd.on{transform:none}
+.rpd .hd{display:flex;justify-content:space-between;align-items:baseline;padding:22px 18px 12px;border-bottom:1px solid var(--line)}
+.rpd .hd h4{font:900 20px/1.2 var(--serif);color:var(--red)}
+.rpd .hd .x{font:500 20px/1 var(--serif);color:var(--ink2);cursor:pointer;padding:0 0 0 12px}
+.rpd .bd{flex:1;display:flex;flex-direction:column;min-height:0}
+.rpd .sts{position:absolute;left:0;top:112px;transform:translateX(-100%);display:flex;flex-direction:column;align-items:flex-end;gap:7px}
+.rpd .sts button{background:color-mix(in srgb,var(--red) 52%,var(--sheet));box-shadow:-1px 1px 4px rgba(0,0,0,.08);transition:background .2s,padding .2s}
+.rpd .sts button.on{background:var(--red);padding-right:13px;box-shadow:-2px 2px 8px rgba(0,0,0,.16)}
+.rpd .rp{overflow-y:auto;padding:4px 18px 30px}
+.rpd .rp ol{border-top:0}
+.rpd .rp li{grid-template-columns:1fr;gap:4px}
+.rpd .rp li b{font:700 14px/1.45 var(--serif)}
+.rpd .rp li i{text-align:left;font:500 9.5px/1.5 var(--mono)}
+.rpd .rp .live{margin-top:12px}
 .list li.todo .x{color:var(--ink3)}
 .list li.cur .x{color:var(--red);font-weight:700}
 .err{margin-top:12px;font:500 11px/1.6 var(--serif);color:var(--red)}
@@ -245,6 +274,8 @@ body,.mast *,.notes,.notes *,.bar,.bar *{transition:background-color var(--t),co
 </div></div>
 <div class="veil" id="veil"></div>
 <div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
+<button type="button" class="rptab" id="rptab">回放</button>
+<div class="rpd" id="rpd"><div class="hd"><h4>回放</h4><span class="x" id="rpx">×</span></div><div class="bd"><div class="sts" id="rpSts"></div><div class="rp" id="rpList"></div></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -752,7 +783,7 @@ function playSay(part, onTick, early) {
     const done = () => { if (finished) return; finished = true; a.onended = a.onerror = a.ontimeupdate = null; try { a.pause(); } catch (e) {} if (cur && cur.el === a) cur = null; resolve(); };
     a.ontimeupdate = () => {
       if (!a.duration) return;
-      onTick && onTick(a.currentTime / a.duration);
+      onTick && onTick(a.currentTime / a.duration, a.currentTime);   /* v15：带上真时间，字幕按它亮 */
       if (!early || finished || !isFinite(a.duration)) return;
       if (!early.asked && a.currentTime > 0.8 && loadedAll(a)) { early.asked = true; early.prefetch(); }   /* v10：先去取下一首的地址 */
       if (a.duration > XF_LEAD + 1 && a.duration - a.currentTime <= XF_LEAD && early.ready()) {
@@ -773,6 +804,9 @@ function playSay(part, onTick, early) {
     try { a.preservesPitch = true; a.webkitPreservesPitch = true; a.defaultPlaybackRate = rate; a.playbackRate = rate; } catch (e) {}
     cur = { kind: 'say', el: a, stop: done, pause() { a.pause(); }, resume() { a.play().catch(() => {}); } };
     a.play().catch(() => { /* 还是被拦了：等她按一下播放键 */ setPaused(true); });
+    /* v15：timeupdate 一秒才四下 —— 看得见的时候用 requestAnimationFrame 采播放器自己的时钟（不自己累加假进度） */
+    const rafTick = () => { if (finished) return; if (!document.hidden && a.duration && !a.paused && onTick) onTick(a.currentTime / a.duration, a.currentTime); requestAnimationFrame(rafTick); };
+    requestAnimationFrame(rafTick);
   });
 }
 /* 一首歌：快放的时候才去取地址（地址二十几分钟就过期） */
@@ -937,6 +971,7 @@ async function begin(S) {
   pump(S);
 }
 function request(S, kind, extra) {
+  if (S.replay) return;   /* v15：回放不找他要新的 */
   if (S.gone || S.ended && kind === 'next') return;
   if (S.inflight) { if (kind !== 'next') S.waiting.push([kind, extra]); return; }
   /* SEG:RADIO v5 —— 信箱里有纸条：这一段就念纸条（她 10-18：「纸条可以一次性读很多张，攒一批一起读」） */
@@ -1070,6 +1105,7 @@ async function pump(S) {
   if (S.gone || S.playing || paused) return;
   const item = S.queue.shift();
   if (!item) {
+    if (S.replay) { S.ended = true; setPaused(true); lcd('这一晚放完了'); toast('回放完了 · 点「回放」挑别的，或者换个台回到直播'); drawNotes(); return; }   /* v15 */
     if (S.ended && !S.inflight) { setPaused(true); lcd('收台了 · 晚安'); drawNotes(); return; }
     if (!S.inflight && !S.ended) {
       if (timeUp()) endByTimer(S);
@@ -1086,12 +1122,22 @@ async function pump(S) {
     return;
   }
   /* 放到最后一样时提前要下一段 —— 「每段问我」开着、或者定时到了，就不提前要 */
-  if (!S.queue.length && !S.inflight && !S.ended && (!PREF.ask || (S.mail && S.mail.length)) && !timeUp()) request(S, 'next');
+  if (!S.replay && !S.queue.length && !S.inflight && !S.ended && (!PREF.ask || (S.mail && S.mail.length)) && !timeUp()) request(S, 'next');
   S.playing = item; progress = 0;
   if (item.type === 'se') { await sleep(playSe(item.name, item.pos)); if (S.gone) return; S.playing = null; return pump(S); }
   if (item.type === 'gap') { await sleep(item.ms || 600); if (S.gone) return; S.playing = null; return pump(S); }
   if (item.type === 'bgm') { S.bgm = item.mood; S.playing = null; bedApply(); drawNotes(); return pump(S); }
   if (item.type === 'water') { S.water = item.name || null; S.playing = null; if (item.name) waterStart(item.name); else waterStop(); return pump(S); }
+  if (item.type === 'her') {   /* v15 回放：她当时插的那句 */
+    S.log.push(['你', item.text, item.at || '', true]);
+    while (S.log.length > 12) S.log.shift();
+    S.playing = null; drawNotes(); return pump(S);
+  }
+  if (item.type === 'song' && !item.enc && item.title) {   /* v15 回放：以前只记了歌名 —— 现找能放的版本 */
+    try { const r = await api('/api/radio/findsong?title=' + encodeURIComponent(item.title) + '&artist=' + encodeURIComponent(item.artist || '')); if (r && r.song) Object.assign(item, { enc: r.song.enc, ori: r.song.ori, cover: r.song.cover }); } catch (e) {}
+    if (S.gone) return;
+    if (!item.enc) { S.log.push(['✕', '《' + item.title + '》' + (item.artist ? ' — ' + item.artist : '') + '\n这边放不了', hhmm(), false]); S.playing = null; drawNotes(); return pump(S); }
+  }
   if (item.type === 'nosong') {   /* v12：他点的这首这边放不了 —— 单子里留一行，带网易云的说法和去 App 的口子，不停 */
     S.log.push(['✕', '《' + item.title + '》' + (item.artist ? ' — ' + item.artist : '') + '\n' + (item.text || '放不出来'), hhmm(), false, { ori: item.ori || '', q: item.title + (item.artist ? ' ' + item.artist : '') }]);
     while (S.log.length > 12) S.log.shift();
@@ -1107,7 +1153,9 @@ async function pump(S) {
     const nx = S.queue[0];
     const early = nx && nx.type === 'song' && nx.enc && S.key !== 'pillow' && item.audio
       ? { prefetch: () => songPrefetch(nx), ready: () => sess === S && !S.gone && !paused && S.queue[0] === nx && !!nx._url } : null;   /* v10 */
-    await playSay(item, f => { progress = f; revealTo(f); }, early);
+    capBind(item);   /* v15：这句有逐字时间就去取，到了就按真时间亮 */
+    await playSay(item, (f, t) => { progress = f; capLastT = t; revealAt(f, t); }, early);
+    capFor = null; capTimes = null; capLastT = null;
     if (!S.gone) S.log.push(['他', S.now.text, S.now.at]);
   } else if (item.type === 'song') {
     S.now = { type: 'song', title: item.title, artist: item.artist, enc: item.enc, at: hhmm() };
@@ -1486,7 +1534,8 @@ function prepReveal(p) {
   for (const c of raw) { if (c === '\n') { extra += 4; continue; } acc += charW(c) + extra; extra = 0; revealW.push(acc); }   /* 第 i 个字念完时累计的分量 */
   revealTotal = acc || 1;
   if (reduce) revealSpans.forEach(w => w.classList.add('on'));
-  else revealTo(progress);
+  else revealAt(progress, capLastT);   /* v15 */
+  capMark();
 }
 const EAR = { '左耳': [4, 1, 1], '右耳': [96, 1, 1], '正前方': [50, 1, 1], '贴近': [50, 1.7, 1], '远一点': [50, .6, .45], '身后': [50, .8, .6] };
 function setEar(posName) {
@@ -1507,6 +1556,161 @@ function openRules() {
 }
 function closeRules() { $('sheet').classList.remove('on'); $('veil').classList.remove('on'); }
 $('rule').addEventListener('click', openRules); $('veil').addEventListener('click', closeRules);
+
+/* SEG:RADIO v15 —— 回放 + 逐字字幕
+   ── 字幕 ── 念字时 ElevenLabs 顺带给每个字几秒开始（不另收钱），后端存在 mp3 旁边；这里按真时间亮字，点哪个字就跳到那儿念。
+   没有时间的那句（以前念的、落回 MiniMax 的、时间对不上字的）照旧按分量估着亮，估出来的不能点。
+   ── 回放 ── 「回放」列这个台以前的每一晚（后端 radio_archive，隔三小时算另一晚），点一晚从头放：他说的（有声音的放声音、没有的只出字）、
+   她当时插的话、放的歌（只记了歌名的现找能放的版本）。回放不找他要新的；放完就停。换台回到直播，或者回放单子上点「回到直播」。 */
+var CAP = new Map();   /* hash → Promise<ElevenLabs 原样的时间 | null> */
+function capFetch(h) { if (!CAP.has(h)) CAP.set(h, api('/api/radio/align?h=' + encodeURIComponent(h)).catch(() => null)); return CAP.get(h); }
+/* 字幕对字 —— 把 ElevenLabs 那串时间对到屏幕上的字：
+   · 那串是它真念的字，带 [whispers] 这种语气标签（不念、也不显示）—— 方括号里的整段跳过；
+   · 只拿「发音的字」（汉字、假名、字母、数字）对，标点、空格、换行不发音，跟着前一个字亮；
+   · 屏幕上的字按顺序在那串里往后找（最多往后看 6 个，碰上转写过的一两个字也能接上），一句里对不上的超过一成就整句不用，照旧按分量估。
+   回一个数组：屏幕上每个 .w（按码位、换行不算）从第几秒开始亮。 */
+const capVoiced = c => /[\p{L}\p{N}]/u.test(c);
+function capCues(show, raw) {
+  if (!raw || !Array.isArray(raw.characters)) return null;
+  const st = raw.character_start_times_seconds || [];
+  const heard = []; let inTag = false;
+  raw.characters.forEach((c, i) => {
+    if (c === '[') { inTag = true; return; }
+    if (inTag) { if (c === ']') inTag = false; return; }
+    const t = Number(st[i]);
+    if (capVoiced(c) && isFinite(t)) heard.push({ c: c.normalize('NFKC').toLowerCase(), t });
+  });
+  if (!heard.length) return null;
+  const out = []; let j = 0, at = heard[0].t, voiced = 0, miss = 0;
+  for (const ch of show) {
+    if (ch === '\n') continue;
+    if (capVoiced(ch)) {
+      voiced++;
+      const want = ch.normalize('NFKC').toLowerCase();
+      let k = j;
+      while (k < heard.length && k - j < 6 && heard[k].c !== want) k++;
+      if (k < heard.length && heard[k].c === want) { at = Math.max(at, heard[k].t); j = k + 1; }
+      else miss++;
+    }
+    out.push(at);
+  }
+  return voiced && miss <= voiced * 0.1 ? out : null;
+}
+var capTimes = null, capFor = null, capLastT = null;   /* capTimes：当前这句每个 .w（跟 revealSpans 一一对应）从第几秒开始念 */
+function capBind(part) {
+  capTimes = null; capFor = part; capLastT = null;
+  if (!part || !part.align) return;
+  capFetch(part.align).then(raw => {
+    if (capFor !== part) return;
+    const t = capCues(part.show || part.text || '', raw);
+    if (!t) return;
+    capTimes = t;
+    capMark();
+    if (capLastT != null) revealAt(progress, capLastT);
+  });
+}
+function capOk() { return !!(capTimes && revealSpans && capTimes.length === revealSpans.length); }
+function capMark() { const rv = document.querySelector('.now .rv'); if (rv) rv.classList.toggle('timed', capOk()); }
+function revealAt(f, t) {
+  if (capOk() && t != null) { for (let i = 0; i < revealSpans.length; i++) revealSpans[i].classList.toggle('on', capTimes[i] <= t + 0.03); capFollow(); return; }
+  revealTo(f);
+  capFollow();
+}
+/* 跟着滚 —— 长的一段念到屏幕下面去了，页面跟着往下走一点，
+   让正在念的那个字停在屏幕四成高的地方；她自己在翻（滚轮 / 手指划）的六秒里不抢，抽屉、规矩那页开着也不动。 */
+var followHold = 0, followAt = 0;
+['wheel', 'touchmove'].forEach(ev => window.addEventListener(ev, () => { followHold = Date.now(); }, { passive: true }));
+function capFollow() {
+  const now = Date.now();
+  if (!revealSpans || !revealSpans.length || document.hidden || now - followHold < 6000 || now - followAt < 900) return;
+  if (($('rpd') && $('rpd').classList.contains('on')) || ($('sheet') && $('sheet').classList.contains('on'))) return;
+  let last = null;
+  for (let i = revealSpans.length - 1; i >= 0; i--) if (revealSpans[i].classList.contains('on')) { last = revealSpans[i]; break; }
+  if (!last) return;
+  const r = last.getBoundingClientRect(), vh = window.innerHeight;
+  if (r.top > 0 && r.bottom > vh - 150) { followAt = now; window.scrollBy({ top: r.top - vh * 0.4, behavior: 'smooth' }); }
+}
+document.addEventListener('click', e => {
+  const w = e.target && e.target.closest ? e.target.closest('.rv.timed .w') : null;
+  if (!w || !capOk() || !cur || cur.kind !== 'say' || !cur.el) return;
+  const i = revealSpans.indexOf(w);
+  if (i < 0) return;
+  capLastT = capTimes[i];
+  revealAt(1, capTimes[i]);
+  capSeek(cur.el, Math.max(0, capTimes[i]));
+  if (paused) setPaused(false);
+});
+/* 念字那条（/api/tts/…）要是不支持断点续传（Range），浏览器只能从头放、跳不了 —— 头一次点字时把这一句整个拿下来换成本地的，就能随便跳 */
+var capBlobs = [];
+async function capSeek(a, t) {
+  const can = a.seekable && a.seekable.length && a.seekable.end(a.seekable.length - 1) > 0;
+  if (can || /^blob:/.test(a.currentSrc || a.src)) { try { a.currentTime = t; } catch (err) {} return; }
+  let b = null;
+  try { b = await fetch(a.currentSrc || a.src).then(r => r.ok ? r.blob() : null); } catch (err) {}
+  if (!b || !cur || cur.el !== a) { if (!b) toast('这一句跳不过去'); return; }
+  const go = !a.paused || !paused;
+  const u = URL.createObjectURL(b); capBlobs.push(u); while (capBlobs.length > 6) URL.revokeObjectURL(capBlobs.shift());
+  a.addEventListener('loadedmetadata', () => { try { a.currentTime = t; } catch (err) {} if (go) a.play().catch(() => {}); }, { once: true });
+  a.src = u;
+}
+function fmtDay(t) { const d = new Date(t); return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()]; }
+function hm2(t) { const d = new Date(t); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+/* SEG:RADIO v16 —— 回放单起一个小标签：右边竖着一枚「回放」，点开右边一屉 —— 左边 故事 / 夜話 / 音樂 / 枕話 四个索引标签，右边 标题 + 时间（小一点）。
+   标题是后端收台时让他起的，单子带 title；没有标题的那一晚（以前的、没收成的）用第一句话 / 放过的歌。 */
+var rpKey = null;
+function openReplay() {
+  rpKey = ST[idx].key;
+  rpDraw();
+  $('rpd').classList.add('on'); $('veil').classList.add('on'); $('rptab').classList.add('hide');
+}
+function closeReplay() { $('rpd').classList.remove('on'); $('rptab').classList.remove('hide'); if (!$('sheet').classList.contains('on')) $('veil').classList.remove('on'); }
+function rpTitle(n, key) {
+  if (n.title) return n.title;
+  if (n.first) return [...n.first].length > 24 ? [...n.first].slice(0, 24).join('') + '…' : n.first;
+  if (n.songs && n.songs.length) return '♪ ' + n.songs.join('、');
+  const s = ST.find(x => x.key === key);
+  return (s ? s.name : '') + ' · 这一晚';
+}
+async function rpDraw() {
+  const key = rpKey;
+  $('rpSts').innerHTML = ST.map(x => `<button type="button" data-k="${x.key}" class="${x.key === key ? 'on' : ''}">${esc(x.name)}</button>`).join('');
+  $('rpSts').querySelectorAll('button').forEach(b => { b.onclick = () => { rpKey = b.dataset.k; rpDraw(); }; });
+  const box = $('rpList');
+  box.innerHTML = '<div class="none">在翻……</div>';
+  let r = null; try { r = await api('/api/radio/replay?station=' + key); } catch (e) {}
+  if (rpKey !== key) return;
+  const nights = (r && r.nights) || [];
+  const live = sess && sess.replay ? '<a class="live" id="rpLive">回到直播 →</a>' : '';
+  box.innerHTML = live + (!nights.length ? '<div class="none">这个台还没有能回放的。从现在起每一段都会记下来。</div>'
+    : '<ol>' + nights.map(n => `<li data-id="${n.id}"><b>${esc(rpTitle(n, key))}</b><i>${fmtDay(n.from)} ${hm2(n.from)}–${hm2(n.to)} · ${n.n} 段${n.voiced < n.say ? ' · ' + n.voiced + '/' + n.say + ' 句有声' : ''}${n.back ? ' · 找回的' : ''}</i></li>`).join('') + '</ol>');
+  if ($('rpLive')) $('rpLive').onclick = () => { closeReplay(); leave(); enter(idx); };
+  box.querySelectorAll('li[data-id]').forEach(li => li.addEventListener('click', () => { closeReplay(); rpGo(key, +li.dataset.id); }));
+}
+/* 点的是别的台的一晚：先把卡座换到那个台（不开播），再放 */
+function rpGo(key, id) {
+  const i = ST.findIndex(x => x.key === key);
+  if (i < 0) return;
+  if (i !== idx) { cancelAnimationFrame(anim); show(i, i >= idx ? 1 : -1); pos = i; frame(); settle(i); }
+  startReplay(ST[i], id);
+}
+async function startReplay(s, id) {
+  let r = null;
+  try { r = await api('/api/radio/replay?station=' + s.key + '&night=' + id); } catch (e) {}
+  if (!r || !r.segs || ST[idx] !== s) { toast('这一晚没取到'); return; }
+  started = true; $('bPlay').classList.remove('wait'); audioOn(); staticOn();
+  leave();
+  const q = [];
+  for (const e of r.segs) {
+    if (e.her) q.push({ type: 'her', text: e.her, at: hm2(e.t) });
+    for (const p of e.parts || []) q.push(Object.assign({}, p, p.type === 'say' ? { text: p.show || '' } : {}));
+  }
+  sess = { key: s.key, st: s, queue: q, inflight: null, log: [], now: null, ended: false, waiting: [], ordered: true, showText: true, tracks: null, trackNo: null, err: '', replay: true, begun: true };
+  setPaused(false);
+  lcd('回放 · ' + fmtDay(r.night.from));
+  toast('回放 ' + fmtDay(r.night.from) + ' 那一晚');
+  drawNotes(); pump(sess);
+}
+$('rptab').addEventListener('click', openReplay); $('rpx').addEventListener('click', closeReplay); $('veil').addEventListener('click', closeReplay);
 
 /* SEG:RADIO v9 —— 她 10-19：「改apk吗 做个播放栏出来 现在只是有声 没有权限」。
    App 壳（WebView）不认网页的 mediaSession，通知栏 / 锁屏上没有播放栏，耳机键也不归它。原生壳可以自己出一根（比如 Android 的 MediaSession 前台服务）：

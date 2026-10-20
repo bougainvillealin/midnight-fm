@@ -12,16 +12,20 @@
    GET  /api/radio/opener?station=  点开先放的那首（马上能放，不等他）
    GET  /api/radio/lyric?enc=       这首歌带时间的歌词（滚动歌词用，要 ncm-cli）
    GET  /api/radio/se               音效素材库里有哪几个；GET /api/radio/se/<名字>.mp3 取文件
+   GET  /api/radio/replay?station=  回放：这个台以前的每一晚（标题、几点到几点、几段）；带 &night=<id> 回那一晚的每一段
+   GET  /api/radio/align?h=         这一句的逐字时间（字幕按它亮字）
+   GET  /api/radio/findsong?title=&artist=   以前只记了歌名的那首，现找能放的版本
    POST /api/radio/turn             让他做一段：{ station, kind, text?, texts?, order?, opener? }
         kind: open（开播）/ next（下一段）/ her（热线）/ memo（纸条）/ req（点歌）/ bye（收台）
-        回：{ ok, parts:[ {type:'say', text, show, pos, audio} | {type:'se', name, pos} | {type:'song', title, artist, enc, ori, cover}
+        回：{ ok, parts:[ {type:'say', text, show, pos, audio, align?} | {type:'se', name, pos} | {type:'song', title, artist, enc, ori, cover}
                          | {type:'bgm', mood} | {type:'gap', ms} | {type:'water', name}
                          | {type:'nosong', title, artist, text, ori} ], tracks, trackNo, ncm, ms }
 
    ── 这个模块离不开宿主，要它提供这几样（见 README「接到你自己的 AI 上」）──
    · POST /api/chat/stream（本机，PORT）：{ message, room, via, parts } → SSE，事件 bubble {text} / error {text} / done。
      同一个 room 接着上一轮往下聊；规矩、历史、排队都是宿主那边的事。
-   · host/tts.js     synth(text) → { hash, via?, skipped? }，念好的音频由宿主放在 /api/tts/<hash>.mp3；cfg() → { provider, el_voice_id, … }
+   · host/tts.js     synth(text, { timestamps?, stability? }) → { hash, via?, align?, skipped? }，念好的音频由宿主放在 /api/tts/<hash>.mp3；
+                     要了 timestamps 就把逐字时间存在 CACHE_DIR/<hash>.align.json；cfg() → { provider, el_voice_id, … }。自带一份 ElevenLabs 版。
    · host/memory.js  remember(title, content, category, importance, tags)；eventAppend({ source, actor, kind, content, meta })
    · host/llm.js     ask(prompt, opts) → 一段字（冷场半小时收尾用，不带工具）
    · 可选：网易云官方 ncm-cli（挑能放的版本、热评、歌词、页面上的「他在翻网易云」小提示）；ElevenLabs key（生成音效素材）。
@@ -44,6 +48,11 @@
      所以换成它认的 (sighs)，认不得的删掉；ElevenLabs 这一句落回了 MiniMax，就换写法重念，之后二十分钟直接按 MiniMax 写。
    ★ 宿主取播放地址要是会被网易云记成「听过」（RADIO_URL_COUNTS_AS_PLAY=1），电台放过的就会混进她的「最近播放」，越放越像她爱听的。
      这时开播那句里多一段：这七天、八到三十天前电台放过的都不算她自己听的；看她口味，红心最准，其次是听歌排行。
+   ★ 枕話单独用一个稳定度（0.75，念得稳一点），别的台照念字模块自己的设定。
+   ★ 回放：每一段做完记一行进 RADIO_SITE_DIR/radio_archive/<台>.jsonl（她插的话、他念的每一句连声音、放的歌、音效），隔三小时以上算另一晚。
+     念字时多要一份逐字时间（ElevenLabs 带时间戳的那条，同一次生成），每一块 say 带 align（那份声音的 hash），页面按真时间亮字、点字跳过去。
+   ★ 收台（说了收台，或者冷场半小时自己收）时，让他按这一晚的记录起一个十二字以内的标题，记进 radio_archive（kind:'title'），回放单子上用；
+     枕話的标题含蓄。没起成的那一晚，单子上用第一句话 / 放过的歌。
    ★ 冷场半小时自己收：每一段记进这个台的「今晚」，最后一段过去三十分钟没动静，就用一两句话收掉：
        故事 / 夜話 / 音樂 → 宿主的事件流；枕話 → 只有一句摘要进记忆，原文不进。 */
 
@@ -529,7 +538,9 @@ function elOn() {
   try { const c = tts().cfg ? tts().cfg() : {}; return String(c.provider || '').toLowerCase() === 'elevenlabs' && !!c.el_voice_id; }
   catch (e) { return false; }
 }
-async function synthAll(parts) {
+/* SEG:RADIO v14 —— 枕話单独用一个稳定度，念得稳一点。只给枕話；念字模块不收这个数就照它自己的设定念 */
+const PILLOW_STABILITY = 0.75;
+async function synthAll(parts, opt) {
   const says = parts.filter(p => p.type === 'say');
   let i = 0;
   const worker = async () => {
@@ -538,7 +549,7 @@ async function synthAll(parts) {
       try {
         const useEl = elOn() && Date.now() > elDownUntil;
         const mm = forMiniMax(p.text);
-        let r = await tts().synth(useEl ? p.text : mm);
+        let r = await tts().synth(useEl ? p.text : mm, useEl ? opt : undefined);
         if (useEl && r && r.hash && r.via !== 'ElevenLabs' && mm !== p.text) {
           /* 选的是 ElevenLabs，这一句却落回了 MiniMax（多半是没额度了）：方括号会被照字念，换写法重念 */
           elDownUntil = Date.now() + 20 * 60000;
@@ -547,6 +558,7 @@ async function synthAll(parts) {
         }
         if (r && r.hash) p.audio = '/api/tts/' + r.hash + '.mp3';
         else p.ttsErr = (r && r.skipped) || '没拿到音频';
+        if (r && r.hash && r.align) p.align = r.hash;   /* v15：这一句有逐字时间 */
       } catch (e) { p.ttsErr = (e && e.message) || String(e); }
     }
   };
@@ -630,6 +642,31 @@ function digestPrompt(key, n, st) {
     + '用一两句话给家里的时间线记一笔：什么时候、听了什么（故事讲到哪 / 聊了什么 / 放了哪几首）、她说了什么。第一人称，平实，别升华，别加前缀，只输出这一两句。\n\n'
     + nightText(n);
 }
+/* SEG:RADIO v16 —— 回放单子上每一晚一个标题，收台的时候自动写。
+   收台（说了收台，或者冷场半小时自己收）时，拿这一晚的记录让他起一个短标题，记进 radio_archive（kind:'title'），回放单子用它；
+   没起成的那一晚，单子上照旧用第一句话 / 放过的歌。枕話的标题含蓄，不露骨。 */
+function titlePrompt(key, n) {
+  return '下面是今晚深夜电台「' + STATIONS[key].name + '」台的记录。给这一晚起一个标题，像节目单上的一行：'
+    + '从今晚真讲到的、放到的、她说到的东西里来，具体，别用「深夜」「温柔」「晚安」这种空词，十二个字以内，不要书名号、引号、句号。'
+    + (key === 'pillow' ? '这是枕話台：标题含蓄一点，不写露骨的词，不复述露骨的细节，别人看到也没关系。' : '')
+    + '只输出标题这一行。\n\n' + nightText(n);
+}
+function cleanTitle(s) {
+  let t = String(s || '').trim().split('\n').map(x => x.trim()).filter(Boolean)[0] || '';
+  t = t.replace(new RegExp('^' + HOST_NAME + '\\s*[:：]\\s*'), '').replace(/^标题\s*[:：]\s*/, '').replace(/[《》「」『』"“”'‘’]/g, '').replace(/[。．.！!]+$/, '').trim();
+  if (!t || /hit your (session|usage) limit|tool_calls|antml:/i.test(t)) return '';
+  return [...t].slice(0, 16).join('');
+}
+async function nightTitle(key, n) {
+  try {
+    if (!n || !Array.isArray(n.lines) || !n.lines.length) return '';
+    const t = cleanTitle(await askImpl(titlePrompt(key, n)));
+    if (!t) return '';
+    fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+    fs.appendFileSync(archFile(key), JSON.stringify({ t: Date.now(), kind: 'title', title: t, parts: [] }) + '\n');
+    return t;
+  } catch (e) { console.warn('[radio] ' + key + ' 这一晚的标题没起成：' + (e && e.message)); return ''; }
+}
 const digesting = new Set();
 async function digest(key, force) {
   if (digesting.has(key) || busy.has(key)) return false;
@@ -652,6 +689,7 @@ async function digest(key, force) {
     }
     ok = true;
     console.log('[radio] ' + key + ' 冷场收了一句（' + n.lines.length + ' 段 → 1）');
+    await nightTitle(key, n);   /* v16：顺手给这一晚起个标题，回放单子上用 */
   } catch (e) {
     console.warn('[radio] ' + key + ' 收尾没成：' + (e && e.message));
   } finally {
@@ -760,6 +798,8 @@ async function turn(body) {
       const day = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }).slice(5);
       const o = fs2.order || {};
       const content = out.meta.summary + (o.scene ? '\n（情境：' + o.scene + '；' + (o.mood || '') + '；' + (o.level || '') + '）' : '');
+      const nightNow = fs2.night;   /* v16：收台了，这一晚起个标题（不挡这一段回去） */
+      if (nightNow) setTimeout(() => { nightTitle(key, nightNow); }, 0);
       try { await memory().remember('枕話 · ' + day, content, '电台', 2, 'radio,枕話'); fs2.lastSummaryAt = Date.now(); delete fs2.night; }
       catch (e) { console.warn('[radio] 摘要没记进去: ' + (e && e.message)); }
       fs2.tracks = null; fs2.trackNo = null;
@@ -769,8 +809,9 @@ async function turn(body) {
     /* 别的台说了收台：当场收，不等三十分钟（不挡这一段回去） */
     if (kind === 'bye' && key !== 'pillow') setTimeout(() => { digest(key, true).catch(() => {}); }, 0);
 
-    await synthAll(out.parts);
+    await synthAll(out.parts, Object.assign({ timestamps: true }, key === 'pillow' ? { stability: PILLOW_STABILITY } : {}));   /* v14 枕話稳定度；v15 逐字时间 */
     out.parts.forEach(p => { if (p.type === 'say') p.show = p.text.replace(TAG_RE, ''); });
+    archiveSeg(key, kind, body, out.parts);   /* v15：记进回放 */
     return { code: 200, obj: { ok: true, parts: out.parts, tracks: fs2.tracks || null, trackNo: fs2.trackNo || null, ncm: ncm.length ? ncm : undefined, warn: r.error || undefined, ms: Date.now() - t0 } };
   } catch (e) {
     return { code: 502, obj: { error: (e && e.message) || String(e), ms: Date.now() - t0 } };
@@ -780,10 +821,98 @@ async function turn(body) {
   }
 }
 
+/* ── SEG:RADIO v15 · 回放：每一段记一行 radio_archive/<台>.jsonl ───────────────────── */
+const ARCHIVE_DIR = path.join(ROOT, 'radio_archive');
+const NIGHT_GAP = 3 * 3600 * 1000;   /* 隔三小时以上算另一晚 */
+const archFile = key => path.join(ARCHIVE_DIR, key + '.jsonl');
+function slimPart(p) {
+  const pick = ks => { const o = { type: p.type }; ks.forEach(k => { if (p[k] != null && p[k] !== '') o[k] = p[k]; }); return o; };
+  if (p.type === 'say') return pick(['show', 'audio', 'align', 'pos']);
+  if (p.type === 'song') return pick(['title', 'artist', 'enc', 'ori', 'cover']);
+  if (p.type === 'nosong') return pick(['title', 'artist', 'text', 'ori']);
+  if (p.type === 'se' || p.type === 'water') return pick(['name', 'pos']);
+  if (p.type === 'gap') return pick(['ms']);
+  if (p.type === 'bgm') return pick(['mood']);
+  return null;
+}
+function archiveSeg(key, kind, body, parts) {
+  try {
+    const e = { t: Date.now(), kind, parts: parts.map(slimPart).filter(Boolean) };
+    if (kind === 'her' || kind === 'memo' || kind === 'req') e.her = String(body.text || '').trim().slice(0, 1000);
+    if (!e.parts.length && !e.her) return;
+    fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+    fs.appendFileSync(archFile(key), JSON.stringify(e) + '\n');
+  } catch (err) { console.warn('[radio] 回放没记上: ' + (err && err.message)); }
+}
+function readArchive(key) {
+  let txt = ''; try { txt = fs.readFileSync(archFile(key), 'utf8'); } catch (e) { return []; }
+  const out = [];
+  for (const line of txt.split('\n')) { if (!line.trim()) continue; try { const e = JSON.parse(line); if (e && e.t) out.push(e); } catch (err) {} }
+  return out.sort((a, b) => a.t - b.t);
+}
+function nightsOf(list) {
+  const nights = [];
+  for (const e of list) {
+    const last = nights[nights.length - 1];
+    if (!last || e.t - last.to > NIGHT_GAP) nights.push({ id: e.t, from: e.t, to: e.t, segs: [] });
+    const n = nights[nights.length - 1];
+    n.to = e.t; n.segs.push(e);
+  }
+  return nights;
+}
+function nightSummary(n, key) {
+  const says = [], songs = [];
+  let voiced = 0, total = 0, her = 0, title = '', segN = 0;
+  for (const e of n.segs) {
+    if (e.kind === 'title') { if (e.title) title = e.title; continue; }   /* v16：收台时起的标题 */
+    segN++;
+    if (e.her) her++;
+    for (const p of e.parts || []) {
+      if (p.type === 'say') { total++; if (p.audio) voiced++; if (says.length < 1 && p.show) says.push(p.show); }
+      if (p.type === 'song' && songs.length < 6) songs.push(p.title);
+    }
+  }
+  const o = { id: n.id, from: n.from, to: n.to, n: segN, say: total, voiced, her, songs, back: n.segs.some(e => e.bf) };
+  if (title) o.title = title;
+  if (key !== 'pillow' && says[0]) o.first = says[0].replace(/\s+/g, ' ').slice(0, 60);   /* 枕話不在单子上露字 */
+  return o;
+}
+function sendAlign(res, h) {
+  if (!/^[0-9a-f]{40}$/.test(String(h || ''))) return send(res, 400, { error: 'h 不对' });
+  let dir = ''; try { dir = tts().CACHE_DIR; } catch (e) {}
+  if (!dir) return send(res, 404, { error: '没有念字模块' });
+  let j = null; try { j = JSON.parse(fs.readFileSync(path.join(dir, h + '.align.json'), 'utf8')); } catch (e) {}
+  if (!j) return send(res, 404, { error: '这一句没有逐字时间' });
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, max-age=31536000, immutable' });
+  return res.end(JSON.stringify(j));
+}
+
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');
   const p = u.pathname;
   try {
+    /* SEG:RADIO v15 —— 字幕的逐字时间、回放 */
+    if (req.method === 'GET' && p === '/api/radio/align') return sendAlign(res, u.searchParams.get('h'));
+    if (req.method === 'GET' && p === '/api/radio/replay') {
+      const key = u.searchParams.get('station') || '';
+      if (!isStation(key)) return send(res, 400, { error: '没有这个台' });
+      const nights = nightsOf(readArchive(key));
+      const nid = Number(u.searchParams.get('night') || 0);
+      if (nid) {
+        const n = nights.find(x => x.id === nid);
+        if (!n) return send(res, 404, { error: '没有这一晚' });
+        return send(res, 200, { station: key, night: nightSummary(n, key), segs: n.segs });
+      }
+      return send(res, 200, { station: key, nights: nights.slice(-120).reverse().map(n => nightSummary(n, key)) });
+    }
+    if (req.method === 'GET' && p === '/api/radio/findsong') {
+      const title = String(u.searchParams.get('title') || '').slice(0, 80), artist = String(u.searchParams.get('artist') || '').slice(0, 80);
+      if (!title) return send(res, 400, { error: '要歌名' });
+      const state = loadState(); const cache = state.playCache || (state.playCache = {});
+      const v = await findPlayable(title, artist, cache, {});
+      const fresh = loadState(); fresh.playCache = Object.assign(fresh.playCache || {}, cache); writeJson(STATE_FILE, fresh);
+      return v ? send(res, 200, { song: v }) : send(res, 404, { error: '这边放不了' });
+    }
     if (req.method === 'GET' && p === '/api/radio/state') {
       const key = u.searchParams.get('station') || '';
       if (!isStation(key)) return send(res, 400, { error: '没有这个台' });
@@ -831,5 +960,5 @@ async function handle(req, res) {
 }
 
 startIdle();
-module.exports = { handle, turn, compose, findPlayable, genSe, seList, ncmSince, digest, sweep, startIdle, forMiniMax, parseLrc, buildLyric, getLyricTimed, near, songId, whyNot, STATIONS, DEFAULT_OPENERS, SE_LIB, IDLE_MIN,
-  _setSearch: f => { searchImpl = f; playMemo.clear(); artistMemo.clear(); }, _setLyric: f => { lyricImpl = f; lyricMemo.clear(); }, _setSePost: f => { sePostImpl = f; }, _setAsk: f => { askImpl = f; } };
+module.exports = { handle, turn, compose, findPlayable, nightTitle, cleanTitle, nightsOf, readArchive, archFile, slimPart, ARCHIVE_DIR, genSe, seList, ncmSince, digest, sweep, startIdle, forMiniMax, parseLrc, buildLyric, getLyricTimed, near, songId, whyNot, STATIONS, DEFAULT_OPENERS, SE_LIB, IDLE_MIN,
+  _setSearch: f => { searchImpl = f; playMemo.clear(); artistMemo.clear(); }, _setLyric: f => { lyricImpl = f; lyricMemo.clear(); }, _setSePost: f => { sePostImpl = f; }, _setAsk: f => { askImpl = f; }, _resetEl: () => { elDownUntil = 0; } };
