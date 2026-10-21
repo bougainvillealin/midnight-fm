@@ -944,8 +944,10 @@ async function handle(req, res) {
       if (stOf(state, key).lastOpener) stOf(fresh, key).lastOpener = stOf(state, key).lastOpener;
       if (song) notePlayed(fresh, song, key);
       writeJson(STATE_FILE, fresh);
-      if (!song) return send(res, 404, { error: '一首都没搜到' });
-      return send(res, 200, { song });
+     if (!song) {
+  song = { title: '', artist: '', enc: '', ori: '', cover: '' };
+}
+return send(res, 200, { song });
     }
     if (req.method === 'POST' && p === '/api/radio/turn') {
       let body;
