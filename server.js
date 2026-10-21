@@ -5,8 +5,8 @@ const radioApi = require('./backend/radio_api.cjs');
 
 const PORT = process.env.PORT || 10000;
 
-const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+const DEEPSEEK_KEY = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || '';
+const DEEPSEEK_MODEL = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 
 const rooms = new Map();
 
