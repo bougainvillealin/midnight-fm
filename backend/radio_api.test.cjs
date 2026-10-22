@@ -298,7 +298,7 @@ const fake = http.createServer((req, res) => {
   /* v4：冷场半小时自己收 —— 夜話 / 故事进事件流，枕話进记忆；收过的清掉 */
   const events = require(path.join(site, 'host', 'memory.js')).events;
   const asked = [];
-  api._setAsk(async prompt => { asked.push(prompt); return '冥河：今晚聊了下班路上的风，她说有点累。'; });
+  api._setAsk(async prompt => { asked.push(prompt); return '顾言：今晚聊了下班路上的风，她说有点累。'; });
   const stFile = path.join(site, 'radio_state.json');
   const night = k => (JSON.parse(fs.readFileSync(stFile, 'utf8')).stations[k] || {}).night;
   const age = (k, min) => { const j = JSON.parse(fs.readFileSync(stFile, 'utf8')); j.stations[k].night.lines.forEach(l => { l.t -= min * 60000; }); fs.writeFileSync(stFile, JSON.stringify(j)); };
@@ -319,7 +319,7 @@ const fake = http.createServer((req, res) => {
   {
     const tl = fs.readFileSync(api.archFile('talk'), 'utf8').trim().split('\n').map(JSON.parse).filter(e => e.kind === 'title');
     assert.strictEqual(tl.length, 1, '收一次起一个标题');
-    assert.strictEqual(tl[0].title, '今晚聊了下班路上的风，她说有点累', '去掉「冥河：」和句号、最多十六个字：' + tl[0].title);
+    assert.strictEqual(tl[0].title, '今晚聊了下班路上的风，她说有点累', '去掉「顾言：」和句号、最多十六个字：' + tl[0].title);
     assert.ok(/给这一晚起一个标题/.test(asked[1]) && !/不写露骨/.test(asked[1]), '夜話的标题那句');
     assert.strictEqual(api.cleanTitle('标题：《雨夜里的收音机》。'), '雨夜里的收音机');
     assert.strictEqual(api.cleanTitle('You\'ve hit your session limit'), '');
