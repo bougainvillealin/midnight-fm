@@ -291,8 +291,8 @@ const hhmm = () => { const d = new Date(); return d.getHours() + ':' + String(d.
 
 /* ── 配置在 localStorage 的 midnight-fm-config：{ baseUrl, token }（见 README）── */
 const CFG = (() => { try { return JSON.parse(localStorage.getItem('midnight-fm-config') || '{}'); } catch (e) { return {}; } })();
-const BASE = CFG.baseUrl || '';
-const TOKEN = CFG.token || '';
+const BASE = CFG.baseUrl || 'https://midnight-fm.onrender.com';
+const TOKEN = CFG.token || 'vesper_and_iain_secret_2026';
 async function api(p, opts) {
   opts = opts || {};
   const h = {};
