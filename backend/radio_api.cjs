@@ -936,7 +936,7 @@ async function handle(req, res) {
       const key = u.searchParams.get('station') || '';
       if (!isStation(key)) return send(res, 400, { error: '没有这个台' });
       const state = loadState();
-      const song = await pickOpener(key, state);
+      let song = await pickOpener(key, state);
       /* v10：挑的这几秒里别的段可能写过状态 —— 重新读一遍，把搜到的、上回开场哪首、放过的并进去 */
       const fresh = loadState();
       fresh.playCache = Object.assign(fresh.playCache || {}, state.playCache || {});
