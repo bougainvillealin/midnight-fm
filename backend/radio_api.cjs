@@ -223,7 +223,12 @@ const memory = () => _memory || (_memory = require('./host/memory'));
 const tts = () => _tts || (_tts = require('./host/tts'));
 const HOST_NAME = process.env.RADIO_HOST_NAME || '冥河';   /* 主持人的名字：收尾那句去掉「冥河：」这种前缀；事件流里记是谁 */
 const urlCountsAsPlay = () => /^(1|true|yes|on)$/i.test(String(process.env.RADIO_URL_COUNTS_AS_PLAY || ''));   /* 宿主取播放地址会不会被网易云记成「听过」 */
-
+/* v17：声音开关 —— 页面点一下，开了用哥哥的声音（ElevenLabs），关了浏览器读（省积分） */
+const VOICE_SWITCH_FILE = path.join(ROOT, 'voice_switch.json');
+function voiceOn() {
+  try { const s = readJson(VOICE_SWITCH_FILE, { on: true }); return s.on !== false; } catch (e) { return true; }
+}
+function setVoice(on) { writeJson(VOICE_SWITCH_FILE, { on: !!on, at: Date.now() }); }
 /* ── SEG:RADIO v10 · 歌词（她 10-19：「要不要做滚动歌词啊」）───────────────
    宿主歌卡那个歌词接口把时间戳去掉了 —— 那边是整段显示用的。滚动要时间，这里自己再取一次：
    ncm-cli song lyric --songId <加密id>，跟歌卡取歌词同一条命令；原文、翻译都是带 [mm:ss.xx] 的 LRC，按时间对上。
@@ -541,6 +546,7 @@ function elOn() {
 /* SEG:RADIO v14 —— 枕話单独用一个稳定度，念得稳一点。只给枕話；念字模块不收这个数就照它自己的设定念 */
 const PILLOW_STABILITY = 0.75;
 async function synthAll(parts, opt) {
+  if (!voiceOn()) return;
   const says = parts.filter(p => p.type === 'say');
   let i = 0;
   const worker = async () => {
@@ -921,7 +927,15 @@ async function handle(req, res) {
       return send(res, 200, { station: key, hasBible: !!st.bible, tracks: st.tracks || null, trackNo: st.trackNo || null, lastSong: st.lastSong || null, lastAt: st.lastAt || null, busy: busy.has(key),
         ncm: lv ? ncmSince(lv.from, lv.to) : [] });
     }
-    if (req.method === 'GET' && p === '/api/radio/se') return send(res, 200, { have: seList() });
+      if (p === '/api/radio/voice') {
+      if (req.method === 'GET') return send(res, 200, { on: voiceOn() });
+      if (req.method === 'POST') {
+        let b = {}; try { b = await readBody(req, 2000); } catch (e) {}
+        setVoice(b.on !== false);
+        return send(res, 200, { on: voiceOn() });
+      }
+    }
+     if (req.method === 'GET' && p === '/api/radio/se') return send(res, 200, { have: seList() });
     const sm = req.method === 'GET' && p.match(/^\/api\/radio\/se\/([^/]+)\.mp3$/);
     if (sm) {
       let name = ''; try { name = decodeURIComponent(sm[1]); } catch (e) {}
