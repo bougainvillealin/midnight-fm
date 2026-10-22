@@ -1824,7 +1824,7 @@ function loop(now) {
     const amp = talking ? 1 : playingSomething ? .55 : 0;
     lbars.forEach(b => { const h = 1.5 + Math.random() * 9 * amp; b.setAttribute('y', 293 - h); b.setAttribute('height', h); });
   }
-  nimationFrame(loop);
+  requestnimationFrame(loop);
 }
 
 /* ═══════════════ 开门 ═══════════════ */
