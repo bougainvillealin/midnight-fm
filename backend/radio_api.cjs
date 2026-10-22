@@ -221,7 +221,7 @@ async function genSe(name) {
 let _memory = null, _tts = null;
 const memory = () => _memory || (_memory = require('./host/memory'));
 const tts = () => _tts || (_tts = require('./host/tts'));
-const HOST_NAME = process.env.RADIO_HOST_NAME || '冥河';   /* 主持人的名字：收尾那句去掉「冥河：」这种前缀；事件流里记是谁 */
+const HOST_NAME = process.env.RADIO_HOST_NAME || '顾言';   /* 主持人的名字：收尾那句去掉「顾言：」这种前缀；事件流里记是谁 */
 const urlCountsAsPlay = () => /^(1|true|yes|on)$/i.test(String(process.env.RADIO_URL_COUNTS_AS_PLAY || ''));   /* 宿主取播放地址会不会被网易云记成「听过」 */
 /* v17：声音开关 —— 页面点一下，开了用哥哥的声音（ElevenLabs），关了浏览器读（省积分） */
 const VOICE_SWITCH_FILE = path.join(ROOT, 'voice_switch.json');
