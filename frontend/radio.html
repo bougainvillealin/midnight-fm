@@ -767,13 +767,45 @@ function songPrefetch(part) {
 function loadedAll(a) { try { const b = a.buffered; return b.length > 0 && b.end(b.length - 1) >= a.duration - 0.25; } catch (e) { return false; } }
 function playSay(part, onTick, early) {
   return new Promise(resolve => {
-    if (!part.audio) {   /* 没念成：字照样显示，停一会儿当它念过 */
-      const ms = Math.min(12000, 1500 + (part.show || '').length * 180);
+    if (!part.audio) {   /* 没念成：启动系统自带语音朗读兜底，免费发声 */
+      let synth = window.speechSynthesis;
+      let textToSpeak = (part.show || '').replace(/\[.*?\]/g, '').trim();
+      let doneCalled = false;
+      function done() {
+        if (doneCalled) return;
+        doneCalled = true;
+        clearInterval(iv);
+        clearTimeout(tm);
+        if (synth) synth.cancel();
+        if (cur && cur.kind === 'say') cur = null;
+        resolve();
+      }
+      const ms = Math.max(2500, (part.show || '').length * 280);
       const t0 = Date.now();
       const iv = setInterval(() => { onTick && onTick(Math.min(1, (Date.now() - t0) / ms)); }, 200);
-      const tm = setTimeout(done, ms);
-      cur = { kind: 'say', stop: done, pause() {}, resume() {} };
-      function done() { clearInterval(iv); clearTimeout(tm); if (cur && cur.kind === 'say') cur = null; resolve(); }
+      const tm = setTimeout(done, ms + 1500);
+
+      if (synth && textToSpeak) {
+        try {
+          synth.cancel();
+          const utt = new SpeechSynthesisUtterance(textToSpeak);
+          utt.lang = 'zh-CN';
+          utt.rate = (sess && sess.key === 'pillow') ? 0.85 : 1.0;
+          utt.onend = done;
+          utt.onerror = done;
+          cur = {
+            kind: 'say',
+            stop: done,
+            pause() { synth.pause(); },
+            resume() { synth.resume(); }
+          };
+          synth.speak(utt);
+        } catch (e) {
+          cur = { kind: 'say', stop: done, pause() {}, resume() {} };
+        }
+      } else {
+        cur = { kind: 'say', stop: done, pause() {}, resume() {} };
+      }
       return;
     }
     /* 枕話才走左右耳；别的台照常放（不经过 WebAudio，锁屏时更稳） */
