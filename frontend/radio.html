@@ -1538,7 +1538,7 @@ function ctlHtml(S) {
   const left = deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 60000)) : 0;
   const tLab = PREF.timer ? (deadline && started ? '定时 · 剩 ' + left + ' 分' : '定时 · ' + PREF.timer + ' 分') : '定时 · 关';
   const live = started && S.begun && !S.ended;   /* SEG:RADIO v5 —— 她 10-18：夜話的「下一段」「收台」没有用 → 每个台都放 */
-  return `<div class="ctl"><button type="button" class="bgmBtn ${PREF.timer ? 'on' : ''}" id="tmBtn">${tLab}</button><button type="button" class="bgmBtn ${PREF.ask ? 'on' : ''}" id="askBtn">每段问我 · ${PREF.ask ? '开' : '关'}</button>``<button type="button" class="bgmBtn ${voiceEl ? 'on' : ''}" id="voiceBtn">声音 · ${voiceLabel()}</button>`
+  return `<div class="ctl"><button type="button" class="bgmBtn ${PREF.timer ? 'on' : ''}" id="tmBtn">${tLab}</button><button type="button" class="bgmBtn ${PREF.ask ? 'on' : ''}" id="askBtn">每段问我 · ${PREF.ask ? '开' : '关'}</button><button type="button" class="bgmBtn ${voiceEl ? 'on' : ''}" id="voiceBtn">声音 · ${voiceLabel()}</button>`
     + (live ? `<button type="button" class="bgmBtn" id="skipSeg">下一段 ›</button>` + (S.key !== 'pillow' ? `<button type="button" class="bgmBtn" id="byeBtn2">${S.byePending ? '在说晚安…' : '晚安，收台'}</button>` : '') : '') + `</div>`
     + (S.askWait ? `<div class="ask">这一段说完了。还要接着听吗？<div class="row"><button type="button" class="go" id="askYes">接着</button><button type="button" id="askNo">收台</button></div></div>` : '');
 }
