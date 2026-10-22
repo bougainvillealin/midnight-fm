@@ -896,6 +896,15 @@ function sendAlign(res, h) {
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');
   const p = u.pathname;
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Radio-Token',
+      'Access-Control-Max-Age': '86400'
+    });
+    return res.end();
+  }
   try {
     /* SEG:RADIO v15 —— 字幕的逐字时间、回放 */
     if (req.method === 'GET' && p === '/api/radio/align') return sendAlign(res, u.searchParams.get('h'));
