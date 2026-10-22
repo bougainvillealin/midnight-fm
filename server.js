@@ -2,7 +2,8 @@
 const http = require('http');
 const https = require('https');
 const radioApi = require('./backend/radio_api.cjs');
-
+const fs = require('fs');
+const tts = require('./backend/host/tts');
 const PORT = process.env.PORT || 10000;
 
 const DEEPSEEK_KEY = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || '';
@@ -108,7 +109,23 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
     return handleChatStream(req, res);
   }
-
+// 念好的声音：/api/tts/<hash>.mp3
+  if (req.method === 'GET' && p.startsWith('/api/tts/')) {
+    const m = p.match(/^\/api\/tts\/([0-9a-f]{40})\.mp3$/);
+    const f = m ? tts.file(m[1]) : null;
+    if (!f || !fs.existsSync(f)) { res.writeHead(404); return res.end(); }
+    const st = fs.statSync(f);
+    const range = req.headers.range;
+    if (range) {
+      const mm = range.match(/bytes=(\d+)-(\d*)/);
+      const start = mm ? parseInt(mm[1], 10) : 0;
+      const end = (mm && mm[2]) ? parseInt(mm[2], 10) : st.size - 1;
+      res.writeHead(206, { 'Content-Type': 'audio/mpeg', 'Content-Length': end - start + 1, 'Content-Range': 'bytes ' + start + '-' + end + '/' + st.size, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=31536000, immutable' });
+      return fs.createReadStream(f, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': st.size, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=31536000, immutable' });
+    return fs.createReadStream(f).pipe(res);
+  }
   res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify({ name: 'Midnight FM', status: 'online', deepseek: DEEPSEEK_KEY ? 'connected' : 'missing' }));
 });
