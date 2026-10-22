@@ -912,6 +912,16 @@ let deadline = 0;
 const timeUp = () => !!deadline && Date.now() > deadline;
 function armTimer() { deadline = PREF.timer ? Date.now() + PREF.timer * 60000 : 0; }
 let sess = null;          /* 这一台这一次：{ key, queue, inflight, log, playing, ended, ... } */
+   let voiceEl = true;   /* 声音开关：true = 哥哥的声音，false = 浏览器读（省积分） */
+const voiceLabel = () => voiceEl ? '哥哥的声音' : '浏览器读';
+function voiceToggle() {
+  voiceEl = !voiceEl;
+  api('/api/radio/voice', { method: 'POST', body: { on: voiceEl } })
+    .then(r => { voiceEl = !!r.on; })
+    .catch(() => toast('声音开关没改成功'));
+  toast('声音：' + voiceLabel() + (voiceEl ? '' : '（省积分）'));
+  if (sess) drawNotes();
+}
 let progress = 0;          /* 当前这一样放到哪了 0~1（磁带两边的带子） */
 const fAt = p => { p = Math.max(0, Math.min(LAST, p)); const i = Math.min(LAST - 1, Math.floor(p)), k = p - i; return ST[i].f + (ST[i + 1].f - ST[i].f) * k; };
 
@@ -1275,7 +1285,7 @@ const endSwipe = () => {
   const commit = Math.abs(d) > .4 || (Math.abs(d) > .22 && vel > .002);   /* v5：划过四成，或者快快一甩，才换台；不然弹回去 */
   const target = commit ? (d > 0 ? Math.ceil(p - .001) : Math.floor(p + .001)) : idx;
   const t = Math.max(0, Math.min(LAST, target));
-  if (t === idx) { pos = p; const from = pos, t0 = performance.now(); const back = now => { const k = Math.min(1, (now - t0) / 260); pos = from + (idx - from) * k; frame(); if (k < 1) requestAnimationFrame(back); else settle(idx); }; requestAnimationFrame(back); }
+  if (t === idx) { pos = p; const from = pos, t0 = performance.now(); const back = now => { const k = Math.min(1, (now - t0) / 260); pos = from + (idx - from) * k; frame(); if (k < 1) nimationFrame(back); else settle(idx); }; nimationFrame(back); }
   else { pos = p; go(t); }
 };
 window.addEventListener('pointerup', endSwipe); window.addEventListener('pointercancel', endSwipe);
@@ -1528,7 +1538,7 @@ function ctlHtml(S) {
   const left = deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 60000)) : 0;
   const tLab = PREF.timer ? (deadline && started ? '定时 · 剩 ' + left + ' 分' : '定时 · ' + PREF.timer + ' 分') : '定时 · 关';
   const live = started && S.begun && !S.ended;   /* SEG:RADIO v5 —— 她 10-18：夜話的「下一段」「收台」没有用 → 每个台都放 */
-  return `<div class="ctl"><button type="button" class="bgmBtn ${PREF.timer ? 'on' : ''}" id="tmBtn">${tLab}</button><button type="button" class="bgmBtn ${PREF.ask ? 'on' : ''}" id="askBtn">每段问我 · ${PREF.ask ? '开' : '关'}</button>`
+  return `<div class="ctl"><button type="button" class="bgmBtn ${PREF.timer ? 'on' : ''}" id="tmBtn">${tLab}</button><button type="button" class="bgmBtn ${PREF.ask ? 'on' : ''}" id="askBtn">每段问我 · ${PREF.ask ? '开' : '关'}</button>``<button type="button" class="bgmBtn ${voiceEl ? 'on' : ''}" id="voiceBtn">声音 · ${voiceLabel()}</button>`
     + (live ? `<button type="button" class="bgmBtn" id="skipSeg">下一段 ›</button>` + (S.key !== 'pillow' ? `<button type="button" class="bgmBtn" id="byeBtn2">${S.byePending ? '在说晚安…' : '晚安，收台'}</button>` : '') : '') + `</div>`
     + (S.askWait ? `<div class="ask">这一段说完了。还要接着听吗？<div class="row"><button type="button" class="go" id="askYes">接着</button><button type="button" id="askNo">收台</button></div></div>` : '');
 }
@@ -1546,6 +1556,7 @@ function bindCtl() {
     PREF.ask = !PREF.ask; lsSet('radio-ask', PREF.ask ? 'on' : 'off');
     if (!PREF.ask && S && S.askWait) askGo(S, true); else drawNotes();
   });
+  if ($('voiceBtn')) $('voiceBtn').addEventListener('click', () => { voiceToggle(); });
   if ($('askYes')) $('askYes').addEventListener('click', () => { audioOn(); askGo(S, true); });
   if ($('askNo')) $('askNo').addEventListener('click', () => askGo(S, false));
 }
@@ -1813,7 +1824,7 @@ function loop(now) {
     const amp = talking ? 1 : playingSomething ? .55 : 0;
     lbars.forEach(b => { const h = 1.5 + Math.random() * 9 * amp; b.setAttribute('y', 293 - h); b.setAttribute('height', h); });
   }
-  requestAnimationFrame(loop);
+  nimationFrame(loop);
 }
 
 /* ═══════════════ 开门 ═══════════════ */
@@ -1824,6 +1835,7 @@ if (first < 0 || ST[first].hidden) first = 2;   /* 默认音乐台：点开先�
 pos = first; idx = first;
 show(first, 1); settle(first); frame(); enter(first);
 setPaused(true);
+api('/api/radio/voice').then(r => { if (r && typeof r.on === 'boolean') voiceEl = r.on; }).catch(() => {});
 requestAnimationFrame(loop);
 })();
 </script>
